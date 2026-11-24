@@ -188,6 +188,7 @@ export default function App() {
     brushSize: 34,
     tolerance: 35,
     feather: 4,
+    floodColor: '#ffffff',
   });
 
   // Libraries & Presets
@@ -425,7 +426,10 @@ export default function App() {
       return tool;
     });
     if (tool !== 'clone') setClonePickMode(false);
-    if (['bubble', 'brush', 'eraser', 'clone', 'logo'].includes(tool)) {
+    if (['bubble', 'brush', 'eraser', 'clone', 'eyedrop'].includes(tool)) {
+      setSelection(null);
+      setQuickTextWin((w) => ({ ...w, open: false }));
+    } else if (tool === 'logo') {
       setQuickTextWin((w) => ({ ...w, open: false }));
     }
     setInspectorTab('properties');
@@ -490,6 +494,12 @@ export default function App() {
         'letterSpacing',
         'scaleX',
         'scaleY',
+        'opacity',
+        'bend',
+        'perspX',
+        'perspY',
+        'bgEnabled',
+        'bgColor',
         'glowEnabled',
         'glowColor',
         'glowRadius',
@@ -543,14 +553,14 @@ export default function App() {
   }, [scriptNext, scriptLines, scriptUsed]);
 
   const handleCreateTextAt = useCallback(
-    (x: number, y: number, boxW = 210, autoFitH?: number) => {
-      const queued = takeNextScriptLine();
+    (x: number, y: number, boxW = 210, autoFitH?: number, initialText?: string) => {
+      const queued = initialText !== undefined ? null : takeNextScriptLine();
       const primaryRef =
         selection?.kind === 'text' ? textsRef.current.find((t) => t.id === selection.ids[0]) : null;
       const baseStyle = primaryRef ?? lastTextStyle;
       const newText = createDefaultTextLayer({
         ...baseStyle,
-        text: queued ?? 'Шинэ текст',
+        text: initialText ?? queued ?? 'Шинэ текст',
         x,
         y,
         boxWidth: boxW,
@@ -630,6 +640,26 @@ export default function App() {
       'Бөмбөлөгт багтаах'
     );
   }, [selection, docW, docH, paintLayers, handleBatchUpdateTexts, showToast]);
+
+  const handleAutoFitText = useCallback(() => {
+    if (!selection || selection.kind !== 'text' || !selection.ids.length) return;
+    const t = textsRef.current.find((x) => x.id === selection.ids[0]);
+    const base = baseCanvasRef.current;
+    if (!t || !base) return;
+    const bub = detectSpeechBubble(t.x, t.y, docW, docH, base, paintLayers);
+    if (bub) {
+      const fittedFs = fitFontSizeToHeight({ ...t, boxWidth: bub.safeW }, bub.safeH);
+      handleBatchUpdateTexts(
+        { x: bub.cx, y: bub.cy, boxWidth: bub.safeW, fontSize: fittedFs },
+        'Бөмбөлөгт багтаах'
+      );
+      return;
+    }
+    const targetBoxW = Math.min(t.boxWidth, Math.round(docW * 0.42));
+    const targetH = Math.max(56, Math.min(180, Math.round(targetBoxW * 0.65)));
+    const fittedFs = fitFontSizeToHeight({ ...t, boxWidth: targetBoxW }, targetH);
+    handleBatchUpdateTexts({ boxWidth: targetBoxW, fontSize: fittedFs }, 'Хайрцагт багтаах');
+  }, [selection, docW, docH, paintLayers, handleBatchUpdateTexts]);
 
   const handleAlignTexts = useCallback(
     (mode: 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom' | 'distributeY' | 'canvasCenter') => {
@@ -799,8 +829,13 @@ export default function App() {
   // Auto Clean All Bubbles
   const handleAutoCleanAllBubbles = useCallback(() => {
     const base = baseCanvasRef.current;
-    const targetLayer = paintLayers.find((l) => l.id === activePaintLayerId && !l.locked) || paintLayers[0];
-    if (!base || !targetLayer) return;
+    const chosen = paintLayers.find((l) => l.id === activePaintLayerId);
+    const targetLayer =
+      (chosen && !chosen.locked ? chosen : null) || paintLayers.find((l) => !l.locked) || null;
+    if (!base || !targetLayer) {
+      showToast('Түгжээгүй засварын давхарга олдсонгүй');
+      return;
+    }
 
     const snap = createPaintCanvas(docW, docH, targetLayer.canvas);
     const stepX = Math.max(24, Math.floor(docW / 26));
@@ -1637,6 +1672,7 @@ export default function App() {
               setClonePickMode(false);
               showToast('Хуулах эх цэг сонгогдлоо');
             }}
+            onPaintBlocked={showToast}
           />
 
           {/* Floating Script Queue Bar */}
@@ -1671,8 +1707,15 @@ export default function App() {
               try {
                 const clip = await navigator.clipboard.readText();
                 if (clip) {
-                  if (selectedTexts.length) handleBatchUpdateTexts({ text: clip }, 'Текст наах');
-                  else handleCreateTextAt(Math.round(docW / 2), 300, 220);
+                  if (selectedTexts.length) {
+                    handleBatchUpdateTexts({ text: clip }, 'Текст наах');
+                  } else {
+                    const ws = workspaceRef.current;
+                    const viewY = ws
+                      ? Math.max(80, Math.min(docH - 80, Math.round((ws.scrollTop + ws.clientHeight * 0.4) / zoom)))
+                      : Math.round(docH / 2);
+                    handleCreateTextAt(Math.round(docW / 2), viewY, 220, undefined, clip);
+                  }
                 }
               } catch {
                 showToast('Ctrl+V дарж наана уу');
@@ -1680,12 +1723,16 @@ export default function App() {
             }}
             onInsertNextText={() => {
               const cur = selectedTexts[0];
+              const ws = workspaceRef.current;
+              const viewY = ws
+                ? Math.max(80, Math.min(docH - 80, Math.round((ws.scrollTop + ws.clientHeight * 0.4) / zoom)))
+                : Math.round(docH / 2);
               const nx = cur ? cur.x : Math.round(docW / 2);
-              const ny = cur ? Math.min(docH - 60, cur.y + 84) : 300;
+              const ny = cur ? Math.min(docH - 60, cur.y + 84) : viewY;
               handleCreateTextAt(nx, ny, cur?.boxWidth || 210);
             }}
             onBubbleFit={handleBubbleFitSelected}
-            onAutoFitText={handleBubbleFitSelected}
+            onAutoFitText={handleAutoFitText}
             onDuplicateSelected={handleDuplicateSelectedText}
             onDeleteSelected={() => {
               if (!selection || selection.kind !== 'text') return;
@@ -1701,6 +1748,7 @@ export default function App() {
             activeTool={activeTool}
             onSelectTool={handleSelectTool}
             visible={!quickTextWin.open}
+            docW={docW}
             brush={brush}
             onUpdateBrush={(patch) => setBrush((b) => ({ ...b, ...patch }))}
             recentColors={recentColors}
@@ -1882,9 +1930,15 @@ export default function App() {
             </button>
           )}
 
-          {/* Mobile Quick Action FABs (Hand pan toggle, Focus toggle, Inspector Drawer) */}
+          {/* Mobile Quick Action FABs (placed at top-right when BottomToolDock is visible so they never overlap) */}
           {!quickTextWin.open && (
-            <div className="md:hidden fixed bottom-14 right-3 z-30 flex flex-col items-end gap-2">
+            <div
+              className={`md:hidden fixed right-2.5 z-30 flex flex-col items-end gap-2 ${
+                ['brush', 'eraser', 'clone', 'bubble', 'logo'].includes(activeTool)
+                  ? 'top-14'
+                  : 'bottom-14'
+              }`}
+            >
               <button
                 type="button"
                 onClick={() =>
@@ -1942,7 +1996,10 @@ export default function App() {
               selection={selection}
               onSelectObjects={(sel) => {
                 setSelection(sel);
-                if (sel?.kind === 'text') setInspectorTab('properties');
+                if (sel) {
+                  setActiveTool(sel.kind === 'logo' ? 'logo' : 'select');
+                  setInspectorTab('properties');
+                }
               }}
               texts={texts}
               onBatchUpdateTexts={handleBatchUpdateTexts}
@@ -2017,12 +2074,21 @@ export default function App() {
             scriptLines={scriptLines}
             scriptUsed={scriptUsed}
             scriptNext={scriptNext}
-            onStartScriptLine={(idx) => {
-              const nextUsed = new Set(scriptUsed);
-              nextUsed.delete(idx);
-              setScriptUsed(nextUsed);
+            onStartScriptLine={(idx, reset) => {
+              if (!scriptLines.length) {
+                showToast('Эхлээд орчуулгын текстээ бичнэ үү');
+                return;
+              }
+              if (reset) {
+                setScriptUsed(new Set());
+              } else {
+                const nextUsed = new Set(scriptUsed);
+                nextUsed.delete(idx);
+                setScriptUsed(nextUsed);
+              }
               setScriptNext(idx);
               handleSelectTool('text');
+              setMobileInspectorOpen(false);
             }}
             logos={logos}
             onUpdateSelectedLogos={(patch, label) => {
@@ -2218,8 +2284,12 @@ export default function App() {
             clean={clean}
             onUpdateClean={(patch) => setClean((c) => ({ ...c, ...patch }))}
             onAutoCleanAll={handleAutoCleanAllBubbles}
-            onAiClean={() => handleAiCleanRegions('view', aiCleanFilter)}
+            onAiClean={handleAiCleanRegions}
             aiCleanBusy={aiCleanBusy}
+            aiCleanFilter={aiCleanFilter}
+            onChangeAiCleanFilter={setAiCleanFilter}
+            clonePickMode={clonePickMode}
+            onToggleClonePickMode={() => setClonePickMode((v) => !v)}
             onPasteScript={async () => {
               try {
                 const clip = await navigator.clipboard.readText();

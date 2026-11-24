@@ -54,6 +54,7 @@ interface BottomToolDockProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  docW: number;
 }
 
 const SIZE_CHIPS = [6, 16, 32, 64, 100];
@@ -88,6 +89,7 @@ export const BottomToolDock: React.FC<BottomToolDockProps> = ({
   canRedo,
   onUndo,
   onRedo,
+  docW,
 }) => {
   const [minimized, setMinimized] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -352,9 +354,9 @@ export const BottomToolDock: React.FC<BottomToolDockProps> = ({
                 )}
               </div>
 
-              {/* Expanded ibisPaint X Controls: Opacity, Hardness, Stabilizer, Taper */}
+              {/* Expanded ibisPaint X Controls: Opacity, Hardness, Spacing, Stabilizer, Taper */}
               {expanded && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1.5 border-t border-neutral-200 dark:border-neutral-800">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1.5 border-t border-neutral-200 dark:border-neutral-800">
                   <label className="flex flex-col gap-1 text-[11px] text-neutral-500 dark:text-neutral-400">
                     <span className="flex justify-between">
                       <span>Тунгалаг</span>
@@ -385,6 +387,20 @@ export const BottomToolDock: React.FC<BottomToolDockProps> = ({
                   </label>
                   <label className="flex flex-col gap-1 text-[11px] text-neutral-500 dark:text-neutral-400">
                     <span className="flex justify-between">
+                      <span>Зай</span>
+                      <span className="font-mono-num text-neutral-800 dark:text-neutral-200">{brush.spacing}%</span>
+                    </span>
+                    <input
+                      type="range"
+                      min={5}
+                      max={80}
+                      value={brush.spacing}
+                      onChange={(e) => onUpdateBrush({ spacing: Number(e.target.value) })}
+                      className="accent-emerald-600"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-neutral-500 dark:text-neutral-400">
+                    <span className="flex justify-between">
                       <span>Тогтворжуулагч</span>
                       <span className="font-mono-num text-neutral-800 dark:text-neutral-200">
                         {brush.stabilizer ?? 4}
@@ -399,7 +415,7 @@ export const BottomToolDock: React.FC<BottomToolDockProps> = ({
                       className="accent-emerald-600"
                     />
                   </label>
-                  <div className="flex items-end">
+                  <div className="col-span-2 sm:col-span-1 flex items-end">
                     <button
                       type="button"
                       onClick={() => onUpdateBrush({ taper: !(brush.taper ?? true) })}
@@ -409,7 +425,7 @@ export const BottomToolDock: React.FC<BottomToolDockProps> = ({
                           : 'border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300'
                       }`}
                     >
-                      Үзүүр нарийсах: {(brush.taper ?? true) ? 'Тийм' : 'Үгүй'}
+                      Үзүүр: {(brush.taper ?? true) ? 'Нарийн' : 'Тэгш'}
                     </button>
                   </div>
                 </div>
@@ -534,10 +550,35 @@ export const BottomToolDock: React.FC<BottomToolDockProps> = ({
                     </span>
                   </div>
                 )}
+                {clean.shape === 'flood' && (
+                  <div className="flex items-center gap-1.5 ml-auto">
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400">Дүүргэх өнгө:</span>
+                    {['#ffffff', '#111111', '#f3f4f6'].map((hex) => (
+                      <button
+                        key={hex}
+                        type="button"
+                        onClick={() => onUpdateClean({ floodColor: hex })}
+                        className={`w-6 h-6 rounded-full border shrink-0 ${
+                          (clean.floodColor || '#ffffff').toLowerCase() === hex
+                            ? 'border-emerald-500 ring-2 ring-emerald-500/40'
+                            : 'border-neutral-300 dark:border-neutral-700'
+                        }`}
+                        style={{ backgroundColor: hex }}
+                      />
+                    ))}
+                    <input
+                      type="color"
+                      value={clean.floodColor || '#ffffff'}
+                      onChange={(e) => onUpdateClean({ floodColor: e.target.value })}
+                      title="Дүүргэх өнгө сонгох"
+                      className="w-7 h-6 rounded border border-neutral-300 dark:border-neutral-700 cursor-pointer shrink-0"
+                    />
+                  </div>
+                )}
               </div>
 
               {expanded && (
-                <div className="grid grid-cols-3 gap-2 pt-1.5 border-t border-neutral-200 dark:border-neutral-800">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1.5 border-t border-neutral-200 dark:border-neutral-800">
                   <label className="flex flex-col gap-1 text-[11px] text-neutral-500 dark:text-neutral-400">
                     <span>Арга</span>
                     <select
@@ -550,6 +591,20 @@ export const BottomToolDock: React.FC<BottomToolDockProps> = ({
                       <option value="erase">Шууд арилгах</option>
                       <option value="inpaint">Auto Текст</option>
                       <option value="fill">Дүүргэх</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] text-neutral-500 dark:text-neutral-400">
+                    <span>Текстийн өнгө</span>
+                    <select
+                      value={clean.polarity}
+                      onChange={(e) =>
+                        onUpdateClean({ polarity: e.target.value as SmartCleanSettings['polarity'] })
+                      }
+                      className="h-7 rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 px-1.5 text-[11px] text-neutral-800 dark:text-neutral-100"
+                    >
+                      <option value="auto">Автомат</option>
+                      <option value="dark">Зөвхөн хар</option>
+                      <option value="light">Зөвхөн цагаан</option>
                     </select>
                   </label>
                   <label className="flex flex-col gap-1 text-[11px] text-neutral-500 dark:text-neutral-400">
@@ -593,72 +648,138 @@ export const BottomToolDock: React.FC<BottomToolDockProps> = ({
 
           {/* ============== LOGO QUICK DOCK ============== */}
           {activeTool === 'logo' && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                onClick={onTriggerLogoUpload}
-                className="h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1"
-              >
-                <ImageIcon className="w-3.5 h-3.5" />
-                + Лого оруулах
-              </button>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={onTriggerLogoUpload}
+                  className="h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1"
+                >
+                  <ImageIcon className="w-3.5 h-3.5" />
+                  + Лого оруулах
+                </button>
 
-              {selectedLogo && (
-                <>
-                  {(
-                    [
-                      ['left', 'Зүүн'],
-                      ['top', 'Дээд'],
-                      ['center', 'Голд'],
-                      ['bottom', 'Доод'],
-                      ['right', 'Баруун'],
-                    ] as const
-                  ).map(([pos, lbl]) => (
+                {selectedLogo && (
+                  <>
+                    {(
+                      [
+                        ['left', 'Зүүн'],
+                        ['top', 'Дээд'],
+                        ['center', 'Голд'],
+                        ['bottom', 'Доод'],
+                        ['right', 'Баруун'],
+                      ] as const
+                    ).map(([pos, lbl]) => (
+                      <button
+                        key={pos}
+                        type="button"
+                        onClick={() => onPlaceLogoPreset(pos)}
+                        className="h-8 px-2 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:border-emerald-500 text-[11px] font-medium text-neutral-700 dark:text-neutral-200"
+                      >
+                        {lbl}
+                      </button>
+                    ))}
+
                     <button
-                      key={pos}
                       type="button"
-                      onClick={() => onPlaceLogoPreset(pos)}
-                      className="h-8 px-2 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:border-emerald-500 text-[11px] font-medium text-neutral-700 dark:text-neutral-200"
+                      onClick={selectedLogo.aboveText ? onSendLogoToBack : onBringLogoToFront}
+                      className="h-8 px-2 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:border-emerald-500 text-[11px] font-medium flex items-center gap-1 text-neutral-700 dark:text-neutral-200"
                     >
-                      {lbl}
+                      <Layers className="w-3.5 h-3.5" />
+                      {selectedLogo.aboveText ? 'Ард илгээх' : 'Урд гаргах'}
                     </button>
-                  ))}
 
-                  <button
-                    type="button"
-                    onClick={selectedLogo.aboveText ? onSendLogoToBack : onBringLogoToFront}
-                    className="h-8 px-2 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:border-emerald-500 text-[11px] font-medium flex items-center gap-1 text-neutral-700 dark:text-neutral-200"
-                  >
-                    <Layers className="w-3.5 h-3.5" />
-                    {selectedLogo.aboveText ? 'Ард илгээх' : 'Урд гаргах'}
-                  </button>
+                    <label className="flex items-center gap-1.5 text-[11px] text-neutral-600 dark:text-neutral-300 px-1">
+                      <span>Тунгалаг</span>
+                      <input
+                        type="range"
+                        min={10}
+                        max={100}
+                        value={Math.round(selectedLogo.opacity * 100)}
+                        onChange={(e) =>
+                          onUpdateSelectedLogos(
+                            { opacity: Number(e.target.value) / 100 },
+                            'Лого тунгалагшил'
+                          )
+                        }
+                        className="w-20 accent-emerald-600"
+                      />
+                    </label>
 
-                  <label className="flex items-center gap-1.5 text-[11px] text-neutral-600 dark:text-neutral-300 px-1">
-                    <span>Тунгалаг</span>
+                    <button
+                      type="button"
+                      onClick={onDeleteSelectedLogo}
+                      className="h-8 w-8 rounded-lg border border-rose-500/40 text-rose-500 flex items-center justify-center ml-auto"
+                      title="Лого устгах"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {expanded && selectedLogo && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1.5 border-t border-neutral-200 dark:border-neutral-800 items-end">
+                  <label className="flex flex-col gap-1 text-[11px] text-neutral-500 dark:text-neutral-400">
+                    <span>Өргөн ({selectedLogo.width}px)</span>
                     <input
                       type="range"
-                      min={10}
-                      max={100}
-                      value={Math.round(selectedLogo.opacity * 100)}
-                      onChange={(e) =>
+                      min={20}
+                      max={Math.max(200, docW)}
+                      value={selectedLogo.width}
+                      onChange={(e) => {
+                        const w = Number(e.target.value);
+                        const ratio = selectedLogo.img.height / Math.max(1, selectedLogo.img.width);
                         onUpdateSelectedLogos(
-                          { opacity: Number(e.target.value) / 100 },
-                          'Лого тунгалагшил'
-                        )
-                      }
-                      className="w-20 accent-emerald-600"
+                          { width: w, height: Math.max(10, Math.round(w * ratio)) },
+                          'Лого хэмжээ'
+                        );
+                      }}
+                      className="accent-emerald-600"
                     />
                   </label>
-
+                  <label className="flex flex-col gap-1 text-[11px] text-neutral-500 dark:text-neutral-400">
+                    <span>Эргүүлэлт ({selectedLogo.rotation}°)</span>
+                    <input
+                      type="range"
+                      min={-180}
+                      max={180}
+                      value={selectedLogo.rotation}
+                      onChange={(e) =>
+                        onUpdateSelectedLogos({ rotation: Number(e.target.value) }, 'Лого эргүүлэх')
+                      }
+                      className="accent-emerald-600"
+                    />
+                  </label>
                   <button
                     type="button"
-                    onClick={onDeleteSelectedLogo}
-                    className="h-8 w-8 rounded-lg border border-rose-500/40 text-rose-500 flex items-center justify-center ml-auto"
-                    title="Лого устгах"
+                    onClick={() => onUpdateSelectedLogos({ flipX: !selectedLogo.flipX }, 'Хэвтээ толь')}
+                    className={`h-7 rounded-lg border text-[11px] font-medium ${
+                      selectedLogo.flipX
+                        ? 'border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                        : 'border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200'
+                    }`}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    ⇄ Хэвтээ толь
                   </button>
-                </>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSelectedLogos({ flipY: !selectedLogo.flipY }, 'Босоо толь')}
+                    className={`h-7 rounded-lg border text-[11px] font-medium ${
+                      selectedLogo.flipY
+                        ? 'border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                        : 'border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200'
+                    }`}
+                  >
+                    ⇅ Босоо толь
+                  </button>
+                </div>
+              )}
+
+              {expanded && !selectedLogo && (
+                <div className="text-[11px] text-neutral-500 dark:text-neutral-400 pt-1 border-t border-neutral-200 dark:border-neutral-800">
+                  Эхлээд лого оруулах эсвэл зураг дээрх логог сонгоно уу.
+                </div>
               )}
             </div>
           )}

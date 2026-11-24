@@ -9,8 +9,10 @@ import {
   ArrowUp,
   Bold,
   BookmarkPlus,
+  Check,
   ChevronDown,
   Copy,
+  Crosshair,
   Eye,
   EyeOff,
   FolderOpen,
@@ -26,8 +28,10 @@ import {
   Trash2,
   Underline,
   Unlock,
+  X,
 } from 'lucide-react';
 import {
+  AiCleanFilter,
   BrushSettings,
   BrushType,
   GradientPreset,
@@ -48,6 +52,17 @@ import {
 import { renderBrushPreviewCurve } from '../utils/canvasEngine';
 import { BUILTIN_FONTS } from '../utils/indexedDb';
 import { ColorStudio } from './ColorStudio';
+
+const BlobImage: React.FC<{ blob: Blob; alt: string; className?: string }> = ({ blob, alt, className }) => {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const u = URL.createObjectURL(blob);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [blob]);
+  if (!url) return null;
+  return <img src={url} alt={alt} className={className} />;
+};
 
 interface RightInspectorProps {
   tab: InspectorTab;
@@ -84,7 +99,7 @@ interface RightInspectorProps {
   scriptLines: string[];
   scriptUsed: Set<number>;
   scriptNext: number;
-  onStartScriptLine: (idx: number) => void;
+  onStartScriptLine: (idx: number, reset?: boolean) => void;
 
   // Logos
   logos: LogoLayer[];
@@ -118,8 +133,12 @@ interface RightInspectorProps {
   clean: SmartCleanSettings;
   onUpdateClean: (patch: Partial<SmartCleanSettings>) => void;
   onAutoCleanAll: () => void;
-  onAiClean?: () => void;
+  onAiClean?: (scope: 'view' | 'all', filter: AiCleanFilter) => void;
   aiCleanBusy?: boolean;
+  aiCleanFilter?: AiCleanFilter;
+  onChangeAiCleanFilter?: (f: AiCleanFilter) => void;
+  clonePickMode?: boolean;
+  onToggleClonePickMode?: () => void;
 
   // Script queue helpers
   onPasteScript?: () => void;
@@ -156,6 +175,7 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
     onChangeTab,
     activeTool,
     docW,
+    docH,
     isDark,
     selection,
     onSelectObjects,
@@ -211,6 +231,10 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
     onAutoCleanAll,
     onAiClean,
     aiCleanBusy = false,
+    aiCleanFilter = 'all',
+    onChangeAiCleanFilter,
+    clonePickMode = false,
+    onToggleClonePickMode,
     onPasteScript,
     onClearScript,
     onCloseMobileSheet,
@@ -241,6 +265,10 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
   const [showEffectsSection, setShowEffectsSection] = useState(false);
   const [showPresetsSection, setShowPresetsSection] = useState(false);
   const [showScriptSection, setShowScriptSection] = useState(false);
+  const [aiScope, setAiScope] = useState<'view' | 'all'>('view');
+  const [savingPresetName, setSavingPresetName] = useState<string | null>(null);
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
+  const [renamingDraft, setRenamingDraft] = useState('');
 
   const selectedTexts =
     selection?.kind === 'text' ? texts.filter((t) => selection.ids.includes(t.id)) : [];
@@ -261,14 +289,14 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
     ).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
-  // Determine which Properties sub-view to show cleanly without crowding!
+  // Tool context takes priority over stale selection so switching to Cleaner or Brush opens its own settings!
   const propContext: 'text' | 'logo' | 'brush' | 'clean' =
-    selection?.kind === 'logo' || activeTool === 'logo'
-      ? 'logo'
-      : activeTool === 'bubble'
+    activeTool === 'bubble'
       ? 'clean'
       : ['brush', 'eraser', 'clone', 'eyedrop'].includes(activeTool)
       ? 'brush'
+      : activeTool === 'logo' || selection?.kind === 'logo'
+      ? 'logo'
       : 'text';
 
   return (
@@ -635,7 +663,7 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                           <input
                             type="color"
                             value={primaryText.color}
-                            onChange={(e) => onBatchUpdateTexts({ color: e.target.value }, 'Үсгийн өнгө')}
+                            onChange={(e) => onBatchUpdateTexts({ color: e.target.value, gradEnabled: false }, 'Үсгийн өнгө')}
                             className="w-full h-7 rounded border border-neutral-300 dark:border-neutral-700 bg-transparent cursor-pointer"
                           />
                         </label>
@@ -905,18 +933,31 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                               />
                             </label>
                           </div>
-                          <div className="grid grid-cols-3 gap-2">
+                          <div className="grid grid-cols-2 gap-2">
                             <label className="text-[11px] text-neutral-500 flex flex-col gap-1">
-                              <span>Эргүүлэлт °</span>
+                              <span>Эргүүлэлт ({primaryText.rotation}°)</span>
                               <input
-                                type="number"
+                                type="range"
                                 min={-180}
                                 max={180}
                                 value={primaryText.rotation}
-                                onChange={(e) => onBatchUpdateTexts({ rotation: Number(e.target.value) || 0 })}
-                                className="h-7 px-2 rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 text-xs font-mono-num text-neutral-900 dark:text-neutral-100"
+                                onChange={(e) => onBatchUpdateTexts({ rotation: Number(e.target.value) })}
+                                className="accent-emerald-600"
                               />
                             </label>
+                            <label className="text-[11px] text-neutral-500 flex flex-col gap-1">
+                              <span>Тунгалаг ({Math.round((primaryText.opacity ?? 1) * 100)}%)</span>
+                              <input
+                                type="range"
+                                min={10}
+                                max={100}
+                                value={Math.round((primaryText.opacity ?? 1) * 100)}
+                                onChange={(e) => onBatchUpdateTexts({ opacity: Number(e.target.value) / 100 })}
+                                className="accent-emerald-600"
+                              />
+                            </label>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
                             <label className="text-[11px] text-neutral-500 flex flex-col gap-1">
                               <span>Нуман ({primaryText.bend})</span>
                               <input
@@ -928,18 +969,30 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                                 className="accent-emerald-600"
                               />
                             </label>
-                            <div className="flex items-end">
-                              <button
-                                type="button"
-                                onClick={() => onBatchUpdateTexts({ scaleX: 1, scaleY: 1, rotation: 0, bend: 0 }, '1:1 сэргээх')}
-                                className="h-7 w-full rounded border border-neutral-300 dark:border-neutral-700 text-[11px] text-neutral-700 dark:text-neutral-200 flex items-center justify-center gap-1"
-                              >
-                                <RotateCcw className="w-3 h-3" />
-                                1:1
-                              </button>
-                            </div>
+                            <label className="text-[11px] text-neutral-500 flex flex-col gap-1">
+                              <span>Налалт X ({primaryText.perspX})</span>
+                              <input
+                                type="range"
+                                min={-60}
+                                max={60}
+                                value={primaryText.perspX}
+                                onChange={(e) => onBatchUpdateTexts({ perspX: Number(e.target.value) })}
+                                className="accent-emerald-600"
+                              />
+                            </label>
+                            <label className="text-[11px] text-neutral-500 flex flex-col gap-1">
+                              <span>Налалт Y ({primaryText.perspY})</span>
+                              <input
+                                type="range"
+                                min={-60}
+                                max={60}
+                                value={primaryText.perspY}
+                                onChange={(e) => onBatchUpdateTexts({ perspY: Number(e.target.value) })}
+                                className="accent-emerald-600"
+                              />
+                            </label>
                           </div>
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="grid grid-cols-3 gap-2 items-end">
                             <label className="text-[11px] text-neutral-500 flex flex-col gap-1">
                               <span>Scale X ({primaryText.scaleX.toFixed(2)}x)</span>
                               <input
@@ -964,6 +1017,19 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                                 className="accent-emerald-600"
                               />
                             </label>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onBatchUpdateTexts(
+                                  { scaleX: 1, scaleY: 1, rotation: 0, bend: 0, perspX: 0, perspY: 0, opacity: 1 },
+                                  '1:1 сэргээх'
+                                )
+                              }
+                              className="h-7 w-full rounded border border-neutral-300 dark:border-neutral-700 text-[11px] text-neutral-700 dark:text-neutral-200 flex items-center justify-center gap-1"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              1:1
+                            </button>
                           </div>
                         </div>
                       )}
@@ -983,14 +1049,54 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                         <button
                           type="button"
                           onClick={() => {
-                            const nm = window.prompt('Шинэ загварын нэр:', `Загвар ${presets.length + 1}`);
-                            if (nm) onSaveCustomPreset(nm);
+                            setShowPresetsSection(true);
+                            setSavingPresetName(`Загвар ${presets.length + 1}`);
                           }}
                           className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline"
                         >
                           + Хадгалах
                         </button>
                       </div>
+                      {savingPresetName !== null && (
+                        <div className="flex items-center gap-1.5 pt-1">
+                          <input
+                            type="text"
+                            value={savingPresetName}
+                            onChange={(e) => setSavingPresetName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && savingPresetName.trim()) {
+                                onSaveCustomPreset(savingPresetName.trim());
+                                setSavingPresetName(null);
+                              } else if (e.key === 'Escape') {
+                                setSavingPresetName(null);
+                              }
+                            }}
+                            placeholder="Загварын нэр..."
+                            className="flex-1 h-7 px-2 rounded border border-emerald-500 bg-neutral-50 dark:bg-neutral-900 text-xs text-neutral-900 dark:text-neutral-100 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (savingPresetName.trim()) {
+                                onSaveCustomPreset(savingPresetName.trim());
+                                setSavingPresetName(null);
+                              }
+                            }}
+                            className="h-7 w-7 rounded bg-emerald-600 text-white flex items-center justify-center"
+                            title="Хадгалах"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSavingPresetName(null)}
+                            className="h-7 w-7 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-500 flex items-center justify-center"
+                            title="Болих"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                       {showPresetsSection && (
                         <div className="grid grid-cols-2 gap-1.5 pt-1">
                           {presets.map((p) => (
@@ -1046,7 +1152,7 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                         )}
                         <button
                           type="button"
-                          onClick={() => onStartScriptLine(0)}
+                          onClick={() => onStartScriptLine(0, true)}
                           className="flex-1 h-7 px-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium"
                         >
                           Эхнээс нь тавих
@@ -1221,6 +1327,22 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                       </label>
                     </div>
 
+                    {!keepLogoRatio && (
+                      <label className="flex flex-col gap-1 text-[11px] text-neutral-500 dark:text-neutral-400">
+                        <span>Өндөр ({selectedLogo.height}px)</span>
+                        <input
+                          type="range"
+                          min={10}
+                          max={Math.max(400, docH)}
+                          value={selectedLogo.height}
+                          onChange={(e) =>
+                            onUpdateSelectedLogos({ height: Number(e.target.value) }, 'Лого өндөр')
+                          }
+                          className="accent-emerald-600"
+                        />
+                      </label>
+                    )}
+
                     <label className="flex items-center gap-2 text-xs text-neutral-700 dark:text-neutral-300 cursor-pointer">
                       <input
                         type="checkbox"
@@ -1235,14 +1357,22 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                       <button
                         type="button"
                         onClick={() => onUpdateSelectedLogos({ flipX: !selectedLogo.flipX }, 'Хэвтээ толь')}
-                        className="h-7 rounded border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-700 dark:text-neutral-200"
+                        className={`h-7 rounded border text-xs ${
+                          selectedLogo.flipX
+                            ? 'border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-medium'
+                            : 'border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200'
+                        }`}
                       >
                         ⇄ Хэвтээ толь
                       </button>
                       <button
                         type="button"
                         onClick={() => onUpdateSelectedLogos({ flipY: !selectedLogo.flipY }, 'Босоо толь')}
-                        className="h-7 rounded border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-700 dark:text-neutral-200"
+                        className={`h-7 rounded border text-xs ${
+                          selectedLogo.flipY
+                            ? 'border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-medium'
+                            : 'border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200'
+                        }`}
                       >
                         ⇅ Босоо толь
                       </button>
@@ -1291,39 +1421,35 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                     </span>
                   ) : (
                     <div className="grid grid-cols-3 gap-2">
-                      {savedLogos.map((sl) => {
-                        const previewUrl = URL.createObjectURL(sl.blob);
-                        return (
-                          <div
-                            key={sl.id}
-                            className="group relative rounded-lg border border-neutral-200 dark:border-neutral-800 p-1.5 bg-neutral-50 dark:bg-neutral-900 flex flex-col items-center gap-1"
+                      {savedLogos.map((sl) => (
+                        <div
+                          key={sl.id}
+                          className="group relative rounded-lg border border-neutral-200 dark:border-neutral-800 p-1.5 bg-neutral-50 dark:bg-neutral-900 flex flex-col items-center gap-1"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => onInsertSavedLogo(sl)}
+                            className="w-full h-12 flex items-center justify-center checker-bg rounded overflow-hidden"
+                            title={`${sl.name} оруулах`}
                           >
-                            <button
-                              type="button"
-                              onClick={() => onInsertSavedLogo(sl)}
-                              className="w-full h-12 flex items-center justify-center checker-bg rounded overflow-hidden"
-                              title={`${sl.name} оруулах`}
-                            >
-                              <img
-                                src={previewUrl}
-                                alt={sl.name}
-                                onLoad={() => URL.revokeObjectURL(previewUrl)}
-                                className="max-h-11 max-w-full object-contain"
-                              />
-                            </button>
-                            <span className="text-[10px] text-neutral-600 dark:text-neutral-300 truncate w-full text-center">
-                              {sl.name}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => onDeleteSavedLogo(sl.id)}
-                              className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-neutral-900/70 text-white text-[10px] opacity-0 group-hover:opacity-100 flex items-center justify-center"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        );
-                      })}
+                            <BlobImage
+                              blob={sl.blob}
+                              alt={sl.name}
+                              className="max-h-11 max-w-full object-contain"
+                            />
+                          </button>
+                          <span className="text-[10px] text-neutral-600 dark:text-neutral-300 truncate w-full text-center">
+                            {sl.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteSavedLogo(sl.id)}
+                            className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-neutral-900/70 text-white text-[10px] opacity-0 group-hover:opacity-100 flex items-center justify-center"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1349,8 +1475,24 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                 </div>
 
                 {activeTool === 'clone' && (
-                  <div className="text-[11px] px-2.5 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-                    Зураг дээр <b>Alt + Click</b> дарж хуулах эх цэгийг сонгоно уу.
+                  <div className="flex flex-col gap-1.5">
+                    {onToggleClonePickMode && (
+                      <button
+                        type="button"
+                        onClick={onToggleClonePickMode}
+                        className={`h-8 px-2.5 rounded-lg border text-xs font-medium flex items-center justify-center gap-1.5 ${
+                          clonePickMode
+                            ? 'border-emerald-500 bg-emerald-600 text-white'
+                            : 'border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:border-emerald-500'
+                        }`}
+                      >
+                        <Crosshair className="w-3.5 h-3.5" />
+                        {clonePickMode ? 'Зураг дээр дарж эх цэг авна уу…' : 'Эх цэг авах'}
+                      </button>
+                    )}
+                    <div className="text-[11px] px-2.5 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                      Зураг дээр <b>Alt + Click</b> эсвэл дээрх товчоор хуулах эх цэгийг сонгоно уу.
+                    </div>
                   </div>
                 )}
 
@@ -1540,6 +1682,33 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                   />
                 </label>
 
+                {clean.shape === 'flood' && (
+                  <div className="flex items-center justify-between gap-2 pt-0.5">
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400">Дүүргэх өнгө</span>
+                    <div className="flex items-center gap-1.5">
+                      {['#ffffff', '#111111', '#f3f4f6'].map((hex) => (
+                        <button
+                          key={hex}
+                          type="button"
+                          onClick={() => onUpdateClean({ floodColor: hex })}
+                          className={`w-6 h-6 rounded-full border shrink-0 ${
+                            (clean.floodColor || '#ffffff').toLowerCase() === hex
+                              ? 'border-emerald-500 ring-2 ring-emerald-500/40'
+                              : 'border-neutral-300 dark:border-neutral-700'
+                          }`}
+                          style={{ backgroundColor: hex }}
+                        />
+                      ))}
+                      <input
+                        type="color"
+                        value={clean.floodColor || '#ffffff'}
+                        onChange={(e) => onUpdateClean({ floodColor: e.target.value })}
+                        className="w-7 h-6 rounded border border-neutral-300 dark:border-neutral-700 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-2">
                   <label className="flex flex-col gap-1 text-[11px] text-neutral-500 dark:text-neutral-400">
                     <span>Мэдрэмж ({clean.tolerance})</span>
@@ -1566,19 +1735,42 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                 </div>
 
                 {onAiClean && (
-                  <button
-                    type="button"
-                    disabled={aiCleanBusy}
-                    onClick={onAiClean}
-                    className="h-8 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs font-semibold flex items-center justify-center gap-1.5"
-                  >
-                    {aiCleanBusy ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Sparkles className="w-3.5 h-3.5" />
-                    )}
-                    {aiCleanBusy ? 'AI таньж цэвэрлэж байна…' : 'AI Бөмбөлөг + SFX цэвэрлэх'}
-                  </button>
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-neutral-200 dark:border-neutral-800">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <select
+                        value={aiScope}
+                        onChange={(e) => setAiScope(e.target.value as 'view' | 'all')}
+                        className="h-7 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 px-2 text-[11px] text-neutral-900 dark:text-neutral-100"
+                      >
+                        <option value="view">Харагдаж буй хэсэг</option>
+                        <option value="all">Бүх хуудас</option>
+                      </select>
+                      {onChangeAiCleanFilter && (
+                        <select
+                          value={aiCleanFilter}
+                          onChange={(e) => onChangeAiCleanFilter(e.target.value as AiCleanFilter)}
+                          className="h-7 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 px-2 text-[11px] text-neutral-900 dark:text-neutral-100"
+                        >
+                          <option value="all">Бөмбөлөг + SFX</option>
+                          <option value="bubble">Зөвхөн бөмбөлөг</option>
+                          <option value="sfx">Зөвхөн SFX</option>
+                        </select>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={aiCleanBusy}
+                      onClick={() => onAiClean(aiScope, aiCleanFilter)}
+                      className="h-8 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs font-semibold flex items-center justify-center gap-1.5"
+                    >
+                      {aiCleanBusy ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-3.5 h-3.5" />
+                      )}
+                      {aiCleanBusy ? 'AI таньж цэвэрлэж байна…' : 'AI Бөмбөлөг + SFX цэвэрлэх'}
+                    </button>
+                  </div>
                 )}
 
                 <button
@@ -1841,16 +2033,43 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                 {[...logos]
                   .reverse()
                   .filter((l) => !l.aboveText)
-                  .map((lo) => (
-                    <div
-                      key={lo.id}
-                      onClick={() => onSelectObjects({ kind: 'logo', ids: [lo.id] })}
-                      className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/70 dark:bg-neutral-900/60 text-xs cursor-pointer"
-                    >
-                      <ImageIcon className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                      <span className="flex-1 truncate text-neutral-800 dark:text-neutral-200">{lo.name}</span>
-                    </div>
-                  ))}
+                  .map((lo) => {
+                    const isSel = selection?.kind === 'logo' && selection.ids.includes(lo.id);
+                    return (
+                      <div
+                        key={lo.id}
+                        onClick={() => onSelectObjects({ kind: 'logo', ids: [lo.id] })}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-xs cursor-pointer ${
+                          isSel
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50/70 dark:bg-neutral-900/60'
+                        }`}
+                      >
+                        <ImageIcon className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span className="flex-1 truncate text-neutral-800 dark:text-neutral-200">{lo.name}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleLogoProp(lo.id, 'visible');
+                          }}
+                          className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
+                        >
+                          {lo.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5 opacity-40" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleLogoProp(lo.id, 'locked');
+                          }}
+                          className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
+                        >
+                          {lo.locked ? <Lock className="w-3.5 h-3.5 text-amber-500" /> : <Unlock className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    );
+                  })}
               </div>
             )}
 
@@ -2026,7 +2245,7 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                 <div className="flex flex-col gap-2">
                   {projects.map((p) => {
                     const isCur = p.id === currentProjectId;
-                    const thumbUrl = p.thumbBlob ? URL.createObjectURL(p.thumbBlob) : null;
+                    const isRenaming = renamingProjectId === p.id;
                     return (
                       <div
                         key={p.id}
@@ -2036,20 +2255,55 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                             : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/50'
                         }`}
                       >
-                        {thumbUrl ? (
-                          <img
-                            src={thumbUrl}
+                        {p.thumbBlob ? (
+                          <BlobImage
+                            blob={p.thumbBlob}
                             alt={p.name}
-                            onLoad={() => URL.revokeObjectURL(thumbUrl)}
                             className="w-10 h-12 object-cover rounded border border-neutral-200 dark:border-neutral-700 bg-white shrink-0"
                           />
                         ) : (
                           <div className="w-10 h-12 rounded bg-neutral-200 dark:bg-neutral-800 shrink-0" />
                         )}
                         <div className="flex-1 min-w-0">
-                          <div className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate">
-                            {p.name}
-                          </div>
+                          {isRenaming ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                value={renamingDraft}
+                                onChange={(e) => setRenamingDraft(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && renamingDraft.trim()) {
+                                    onRenameProjectById(p.id, renamingDraft.trim());
+                                    setRenamingProjectId(null);
+                                  } else if (e.key === 'Escape') {
+                                    setRenamingProjectId(null);
+                                  }
+                                }}
+                                className="flex-1 min-w-0 h-6 px-1.5 rounded border border-emerald-500 bg-white dark:bg-neutral-900 text-xs text-neutral-900 dark:text-neutral-100 focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (renamingDraft.trim()) onRenameProjectById(p.id, renamingDraft.trim());
+                                  setRenamingProjectId(null);
+                                }}
+                                className="h-6 w-6 rounded bg-emerald-600 text-white flex items-center justify-center shrink-0"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setRenamingProjectId(null)}
+                                className="h-6 w-6 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-500 flex items-center justify-center shrink-0"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+                              {p.name}
+                            </div>
+                          )}
                           <div className="text-[10.5px] font-mono-num text-neutral-500">
                             {p.docW}×{p.docH} · {formatTime(p.updatedAt)}
                           </div>
@@ -2065,8 +2319,8 @@ export const RightInspector: React.FC<RightInspectorProps> = (props) => {
                             <button
                               type="button"
                               onClick={() => {
-                                const nn = window.prompt('Шинэ нэр:', p.name);
-                                if (nn && nn.trim()) onRenameProjectById(p.id, nn.trim());
+                                setRenamingProjectId(p.id);
+                                setRenamingDraft(p.name);
                               }}
                               className="text-[11px] text-neutral-600 dark:text-neutral-400 hover:underline"
                             >

@@ -71,6 +71,7 @@ interface CanvasStageProps {
   onRedo?: () => void;
   clonePickMode?: boolean;
   onClonePicked?: () => void;
+  onPaintBlocked?: (msg: string) => void;
 }
 
 type DragState =
@@ -106,6 +107,9 @@ type DragState =
       kind: 'paint';
       layerId: string;
       snapshot: HTMLCanvasElement;
+      strokeCanvas: HTMLCanvasElement | null;
+      cloneOffset: { dx: number; dy: number } | null;
+      cloneSourceCanvas: HTMLCanvasElement | null;
       minX: number;
       minY: number;
       maxX: number;
@@ -163,6 +167,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   onRedo,
   clonePickMode = false,
   onClonePicked,
+  onPaintBlocked,
 }) => {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const compCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -173,8 +178,8 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
   const [hoverDoc, setHoverDoc] = useState<{ x: number; y: number } | null>(null);
   const [guides, setGuides] = useState<AlignmentGuide[]>([]);
   const [cloneSrc, setCloneSrc] = useState<{ x: number; y: number } | null>(null);
-  const [cloneOffset, setCloneOffset] = useState<{ dx: number; dy: number } | null>(null);
   const [splitPct, setSplitPct] = useState(50);
+  const splitDragRef = useRef(false);
   const [dragOver, setDragOver] = useState(false);
 
   // Refs for live mutation during drag without spamming history
@@ -700,12 +705,21 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
     return null;
   };
 
-  const getActivePaintLayer = (): PaintLayer | null => {
-    return (
-      paintLayers.find((l) => l.id === activePaintLayerId && !l.locked) ||
-      paintLayers.find((l) => !l.locked) ||
-      null
-    );
+  const getActivePaintLayer = (): { layer: PaintLayer | null; error?: string } => {
+    const selected = paintLayers.find((l) => l.id === activePaintLayerId);
+    if (selected) {
+      if (selected.locked) return { layer: null, error: 'Сонгосон давхарга түгжээтэй байна' };
+      if (!selected.visible) return { layer: null, error: 'Сонгосон давхарга нуугдсан (Eye) байна' };
+      return { layer: selected };
+    }
+    const fallback = paintLayers.find((l) => !l.locked && l.visible);
+    if (fallback) return { layer: fallback };
+    return {
+      layer: null,
+      error: paintLayers.some((l) => !l.locked)
+        ? 'Идэвхтэй давхарга нуугдсан (Eye) байна'
+        : 'Бүх засварын давхарга түгжээтэй байна',
+    };
   };
 
   const snapshotCanvas = (src: HTMLCanvasElement): HTMLCanvasElement => {
@@ -714,6 +728,38 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
     c.height = src.height;
     c.getContext('2d')!.drawImage(src, 0, 0);
     return c;
+  };
+
+  const compositeStrokeDirtyRect = (
+    targetCtx: CanvasRenderingContext2D,
+    snapshot: HTMLCanvasElement,
+    strokeCanvas: HTMLCanvasElement,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    strokeSize: number,
+    isEraser: boolean
+  ) => {
+    const pad = Math.ceil(strokeSize * 0.9) + 12;
+    const ux = Math.max(0, Math.floor(Math.min(x0, x1) - pad));
+    const uy = Math.max(0, Math.floor(Math.min(y0, y1) - pad));
+    const ux2 = Math.min(docW, Math.ceil(Math.max(x0, x1) + pad));
+    const uy2 = Math.min(docH, Math.ceil(Math.max(y0, y1) + pad));
+    const uw = ux2 - ux;
+    const uh = uy2 - uy;
+    if (uw <= 0 || uh <= 0) return;
+
+    targetCtx.save();
+    targetCtx.beginPath();
+    targetCtx.rect(ux, uy, uw, uh);
+    targetCtx.clip();
+    targetCtx.clearRect(ux, uy, uw, uh);
+    targetCtx.drawImage(snapshot, ux, uy, uw, uh, ux, uy, uw, uh);
+    if (isEraser) targetCtx.globalCompositeOperation = 'destination-out';
+    targetCtx.globalAlpha = Math.max(0.01, Math.min(1, brush.opacity / 100));
+    targetCtx.drawImage(strokeCanvas, ux, uy, uw, uh, ux, uy, uw, uh);
+    targetCtx.restore();
   };
 
   // Ctrl+Wheel zoom centered at cursor
@@ -1111,7 +1157,12 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
       }
 
       if (activeTool === 'logo') {
-        onOpenLogoUpload();
+        if (!selection) {
+          onOpenLogoUpload();
+        } else {
+          onSelectObjects(null);
+          onCloseQuickText?.();
+        }
         return;
       }
 
@@ -1151,26 +1202,61 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
     }
 
     // Paint / Eraser / Clone / Smart Clean
-    const targetLayer = getActivePaintLayer();
     const base = baseCanvasRef.current;
-    if (!targetLayer || !base) return;
+    if (!base) return;
+
+    if (activeTool === 'clone' && !cloneSrc) {
+      setCloneSrc({ x: Math.round(x), y: Math.round(y) });
+      onClonePicked?.();
+      return;
+    }
+
+    const { layer: targetLayer, error: layerErr } = getActivePaintLayer();
+    if (!targetLayer) {
+      if (layerErr) onPaintBlocked?.(layerErr);
+      return;
+    }
 
     if (['brush', 'eraser', 'clone'].includes(activeTool)) {
-      if (activeTool === 'clone' && !cloneSrc) {
-        setCloneSrc({ x: Math.round(x), y: Math.round(y) });
-        return;
-      }
       const cOff = activeTool === 'clone' && cloneSrc ? { dx: cloneSrc.x - x, dy: cloneSrc.y - y } : null;
-      if (cOff) setCloneOffset(cOff);
-
       const snap = snapshotCanvas(targetLayer.canvas);
+
+      // Capture composite art + visible paint layers for clone and blur sampling
+      let cloneSourceCanvas: HTMLCanvasElement | null = null;
+      if (activeTool === 'clone' || brush.type === 'blur') {
+        cloneSourceCanvas = document.createElement('canvas');
+        cloneSourceCanvas.width = docW;
+        cloneSourceCanvas.height = docH;
+        const scCtx = cloneSourceCanvas.getContext('2d')!;
+        scCtx.drawImage(base, 0, 0);
+        for (const pl of paintLayers) {
+          if (!pl.visible) continue;
+          scCtx.save();
+          scCtx.globalAlpha = pl.opacity;
+          scCtx.drawImage(pl.canvas, 0, 0);
+          scCtx.restore();
+        }
+      }
+
+      // Use isolated stroke buffer so semi-transparent strokes don't pile up mid-stroke (except accumulative airbrush & live blur)
+      const useBuffer =
+        activeTool === 'eraser' ||
+        activeTool === 'clone' ||
+        (activeTool === 'brush' && brush.type !== 'airbrush' && brush.type !== 'blur');
+      const strokeCanvas = useBuffer ? document.createElement('canvas') : null;
+      if (strokeCanvas) {
+        strokeCanvas.width = docW;
+        strokeCanvas.height = docH;
+      }
+
+      const drawCtx = (strokeCanvas || targetLayer.canvas).getContext('2d', { willReadFrequently: true })!;
       const pCtx = targetLayer.canvas.getContext('2d', { willReadFrequently: true })!;
       const taperOn = brush.taper ?? true;
       const startPressure =
         e.pointerType === 'pen' && e.pressure > 0 ? Math.max(0.25, Math.min(1.25, e.pressure * 1.4)) : taperOn ? 0.65 : 1;
       const initSize = Math.max(1, brush.size * startPressure);
       applyBrushSegment(
-        pCtx,
+        drawCtx,
         x,
         y,
         x + 0.01,
@@ -1182,13 +1268,32 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
         base,
         paintLayers,
         cOff,
-        initSize
+        initSize,
+        useBuffer ? 100 : brush.opacity,
+        cloneSourceCanvas,
+        activeTool === 'eraser' && useBuffer
       );
+      if (strokeCanvas) {
+        compositeStrokeDirtyRect(
+          pCtx,
+          snap,
+          strokeCanvas,
+          x,
+          y,
+          x,
+          y,
+          Math.max(brush.size, initSize),
+          activeTool === 'eraser'
+        );
+      }
       redrawComposite();
       setDrag({
         kind: 'paint',
         layerId: targetLayer.id,
         snapshot: snap,
+        strokeCanvas,
+        cloneOffset: cOff,
+        cloneSourceCanvas,
         minX: x,
         minY: y,
         maxX: x,
@@ -1208,7 +1313,17 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
     if (activeTool === 'bubble') {
       if (clean.shape === 'flood') {
         const snap = snapshotCanvas(targetLayer.canvas);
-        const bounds = floodFillOnLayer(x, y, clean.tolerance, brush.color, docW, docH, base, paintLayers, targetLayer);
+        const bounds = floodFillOnLayer(
+          x,
+          y,
+          clean.tolerance,
+          clean.floodColor || '#ffffff',
+          docW,
+          docH,
+          base,
+          paintLayers,
+          targetLayer
+        );
         if (bounds) {
           const [bx, by, bx2, by2] = bounds;
           const beforeImg = snap.getContext('2d')!.getImageData(bx, by, bx2 - bx, by2 - by);
@@ -1417,6 +1532,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
       const nextSize = drag.lastSize + (brush.size * targetFactor - drag.lastSize) * 0.35;
 
       const pCtx = targetLayer.canvas.getContext('2d', { willReadFrequently: true })!;
+      const drawCtx = (drag.strokeCanvas || targetLayer.canvas).getContext('2d', { willReadFrequently: true })!;
       // Quadratic Bezier smoothing along prevMid -> drag.smooth -> mid
       const segLen = Math.hypot(midX - drag.prevMidX, midY - drag.prevMidY);
       const subSteps = Math.max(1, Math.min(6, Math.ceil(segLen / 10)));
@@ -1429,7 +1545,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
         const qy = omt * omt * drag.prevMidY + 2 * omt * t * drag.smoothY + t * t * midY;
         const interpSize = drag.lastSize + (nextSize - drag.lastSize) * t;
         applyBrushSegment(
-          pCtx,
+          drawCtx,
           cx0,
           cy0,
           qx,
@@ -1440,11 +1556,28 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
           docH,
           base,
           paintLayers,
-          cloneOffset,
-          interpSize
+          drag.cloneOffset,
+          interpSize,
+          drag.strokeCanvas ? 100 : brush.opacity,
+          drag.cloneSourceCanvas,
+          activeTool === 'eraser' && !!drag.strokeCanvas
         );
         cx0 = qx;
         cy0 = qy;
+      }
+
+      if (drag.strokeCanvas) {
+        compositeStrokeDirtyRect(
+          pCtx,
+          drag.snapshot,
+          drag.strokeCanvas,
+          drag.prevMidX,
+          drag.prevMidY,
+          midX,
+          midY,
+          Math.max(brush.size, drag.lastSize, nextSize) + Math.abs(drag.smoothX - midX) + Math.abs(drag.smoothY - midY),
+          activeTool === 'eraser'
+        );
       }
 
       redrawComposite();
@@ -1553,7 +1686,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
     if (drag.kind === 'paint') {
       const targetLayer = paintLayers.find((l) => l.id === drag.layerId);
       if (targetLayer) {
-        const pad = Math.ceil(brush.size / 2) + 8;
+        const pad = Math.ceil(brush.size * 0.85) + 18;
         const bx = Math.max(0, Math.floor(drag.minX - pad));
         const by = Math.max(0, Math.floor(drag.minY - pad));
         const bx2 = Math.min(docW, Math.ceil(drag.maxX + pad));
@@ -1703,18 +1836,25 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({
         {beforeAfterMode === 'split' && (
           <div
             style={{ left: `${splitPct}%` }}
-            className="absolute top-0 bottom-0 w-0.5 bg-emerald-500 z-20 cursor-ew-resize"
+            className="absolute top-0 bottom-0 w-0.5 bg-emerald-500 z-20 cursor-ew-resize touch-none"
             onPointerDown={(e) => {
               e.stopPropagation();
-              const target = e.currentTarget;
-              target.setPointerCapture(e.pointerId);
+              splitDragRef.current = true;
+              e.currentTarget.setPointerCapture(e.pointerId);
             }}
             onPointerMove={(e) => {
-              if (e.buttons !== 1 || !stageRef.current) return;
+              if (!splitDragRef.current || !stageRef.current) return;
               e.stopPropagation();
               const r = stageRef.current.getBoundingClientRect();
               const pct = Math.max(5, Math.min(95, ((e.clientX - r.left) / r.width) * 100));
               setSplitPct(pct);
+            }}
+            onPointerUp={(e) => {
+              e.stopPropagation();
+              splitDragRef.current = false;
+            }}
+            onPointerCancel={() => {
+              splitDragRef.current = false;
             }}
           >
             <div className="sticky top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-emerald-600 text-white border-2 border-white shadow-lg flex items-center justify-center text-xs font-bold">

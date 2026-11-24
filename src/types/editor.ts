@@ -132,6 +132,7 @@ export interface SmartCleanSettings {
   brushSize: number;
   tolerance: number;
   feather: number;
+  floodColor?: string;
 }
 
 export interface WorkspaceSettings {

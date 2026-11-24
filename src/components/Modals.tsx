@@ -181,8 +181,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [subfolder, setSubfolder] = useState('');
 
   React.useEffect(() => {
-    if (open) setFilename(defaultFilename);
-  }, [open, defaultFilename]);
+    if (open) {
+      setFilename(defaultFilename);
+      setSliceMode((cur) => (hasPages && cur === 'none' ? 'pages' : !hasPages && cur === 'pages' ? 'none' : cur));
+    }
+  }, [open, defaultFilename, hasPages]);
 
   if (!open) return null;
 

@@ -59,6 +59,7 @@ export const ColorStudio: React.FC<ColorStudioProps> = ({
   const [hexDraft, setHexDraft] = useState(color.toUpperCase());
   const svCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const hueCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const dragTargetRef = useRef<'sv' | 'hue' | null>(null);
 
   useEffect(() => {
     setHexDraft(color.toUpperCase());
@@ -148,13 +149,22 @@ export const ColorStudio: React.FC<ColorStudioProps> = ({
       <div
         className={`relative w-full ${compact ? 'h-32' : 'h-40'} rounded-lg overflow-hidden border border-neutral-300 dark:border-neutral-700 cursor-crosshair touch-none`}
         onPointerDown={(e) => {
+          dragTargetRef.current = 'sv';
           e.currentTarget.setPointerCapture(e.pointerId);
           handleSvPointer(e, false);
         }}
         onPointerMove={(e) => {
-          if (e.buttons === 1) handleSvPointer(e, false);
+          if (dragTargetRef.current === 'sv') handleSvPointer(e, false);
         }}
-        onPointerUp={(e) => handleSvPointer(e, true)}
+        onPointerUp={(e) => {
+          if (dragTargetRef.current === 'sv') {
+            dragTargetRef.current = null;
+            handleSvPointer(e, true);
+          }
+        }}
+        onPointerCancel={() => {
+          dragTargetRef.current = null;
+        }}
       >
         <canvas ref={svCanvasRef} width={240} height={160} className="w-full h-full block" />
         <div
@@ -171,13 +181,22 @@ export const ColorStudio: React.FC<ColorStudioProps> = ({
       <div
         className="relative w-full h-4 rounded-md overflow-hidden border border-neutral-300 dark:border-neutral-700 cursor-ew-resize touch-none"
         onPointerDown={(e) => {
+          dragTargetRef.current = 'hue';
           e.currentTarget.setPointerCapture(e.pointerId);
           handleHuePointer(e, false);
         }}
         onPointerMove={(e) => {
-          if (e.buttons === 1) handleHuePointer(e, false);
+          if (dragTargetRef.current === 'hue') handleHuePointer(e, false);
         }}
-        onPointerUp={(e) => handleHuePointer(e, true)}
+        onPointerUp={(e) => {
+          if (dragTargetRef.current === 'hue') {
+            dragTargetRef.current = null;
+            handleHuePointer(e, true);
+          }
+        }}
+        onPointerCancel={() => {
+          dragTargetRef.current = null;
+        }}
       >
         <canvas ref={hueCanvasRef} width={240} height={16} className="w-full h-full block" />
         <div

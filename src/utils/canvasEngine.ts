@@ -431,15 +431,44 @@ export function detectSpeechBubble(
   if (rw < 10 || rh < 10) return null;
 
   const data = sampleCompositeRegion(rx, ry, rw, rh, baseCanvas, paintLayers);
-  const startIdx = ((py - ry) * rw + (px - rx)) * 4;
-  const sr = data[startIdx];
-  const sg = data[startIdx + 1];
-  const sb = data[startIdx + 2];
+  let seedLx = px - rx;
+  let seedLy = py - ry;
+  let startIdx = (seedLy * rw + seedLx) * 4;
+  let sr = data[startIdx];
+  let sg = data[startIdx + 1];
+  let sb = data[startIdx + 2];
+
+  // If the user tapped directly on dark lettering inside a white speech bubble,
+  // spiral out up to 18px to find the brightest bubble interior pixel.
+  const startLum = 0.299 * sr + 0.587 * sg + 0.114 * sb;
+  if (startLum < 150) {
+    let bestLum = startLum;
+    for (let r = 2; r <= 18; r += 2) {
+      for (let a = 0; a < 12; a++) {
+        const ang = (a / 12) * Math.PI * 2;
+        const nx = Math.round(seedLx + Math.cos(ang) * r);
+        const ny = Math.round(seedLy + Math.sin(ang) * r);
+        if (nx < 0 || nx >= rw || ny < 0 || ny >= rh) continue;
+        const ni = (ny * rw + nx) * 4;
+        const lum = 0.299 * data[ni] + 0.587 * data[ni + 1] + 0.114 * data[ni + 2];
+        if (lum > bestLum) {
+          bestLum = lum;
+          seedLx = nx;
+          seedLy = ny;
+          startIdx = ni;
+          sr = data[ni];
+          sg = data[ni + 1];
+          sb = data[ni + 2];
+        }
+      }
+      if (bestLum >= 210) break;
+    }
+  }
 
   const tol = 95;
   const visited = new Uint8Array(rw * rh);
-  const queue: number[] = [px - rx, py - ry];
-  visited[(py - ry) * rw + (px - rx)] = 1;
+  const queue: number[] = [seedLx, seedLy];
+  visited[seedLy * rw + seedLx] = 1;
 
   let head = 0;
   let count = 0;
@@ -541,10 +570,13 @@ export function applyBrushSegment(
   baseCanvas: HTMLCanvasElement,
   paintLayers: PaintLayer[],
   cloneOffset: { dx: number; dy: number } | null,
-  sizeOverride?: number
+  sizeOverride?: number,
+  opacityOverride?: number,
+  cloneSourceCanvas?: HTMLCanvasElement | null,
+  eraserAsMask = false
 ) {
   const size = Math.max(1, sizeOverride ?? brush.size);
-  const alpha = Math.max(0.01, Math.min(1, brush.opacity / 100));
+  const alpha = Math.max(0.01, Math.min(1, (opacityOverride ?? brush.opacity) / 100));
   const hardness = Math.max(0, Math.min(100, brush.hardness)) / 100;
   const spacingPx = Math.max(1.5, size * (Math.max(5, brush.spacing) / 100));
   const dist = Math.hypot(x2 - x1, y2 - y1);
@@ -554,19 +586,19 @@ export function applyBrushSegment(
 
   if (mode === 'eraser') {
     paintCtx.save();
-    paintCtx.globalCompositeOperation = 'destination-out';
+    paintCtx.globalCompositeOperation = eraserAsMask ? 'source-over' : 'destination-out';
     for (let i = 0; i <= steps; i++) {
       const t = steps === 0 ? 0 : i / steps;
       const px = x1 + (x2 - x1) * t;
       const py = y1 + (y2 - y1) * t;
-      if (hardness >= 0.95) {
+      if (hardness >= 0.97) {
         paintCtx.globalAlpha = alpha;
         paintCtx.fillStyle = '#000';
         paintCtx.beginPath();
         paintCtx.arc(px, py, r, 0, Math.PI * 2);
         paintCtx.fill();
       } else {
-        const g = paintCtx.createRadialGradient(px, py, r * hardness * 0.85, px, py, r);
+        const g = paintCtx.createRadialGradient(px, py, r * hardness * 0.9, px, py, r);
         g.addColorStop(0, `rgba(0,0,0,${alpha})`);
         g.addColorStop(1, 'rgba(0,0,0,0)');
         paintCtx.fillStyle = g;
@@ -580,6 +612,7 @@ export function applyBrushSegment(
   }
 
   if (mode === 'clone' && cloneOffset) {
+    const srcCanvas = cloneSourceCanvas || baseCanvas;
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const px = x1 + (x2 - x1) * t;
@@ -590,7 +623,7 @@ export function applyBrushSegment(
       paintCtx.arc(px, py, r, 0, Math.PI * 2);
       paintCtx.clip();
       paintCtx.drawImage(
-        baseCanvas,
+        srcCanvas,
         px + cloneOffset.dx - r,
         py + cloneOffset.dy - r,
         size,
@@ -606,27 +639,38 @@ export function applyBrushSegment(
   }
 
   if (brush.type === 'blur') {
-    const bx = Math.max(0, Math.floor(x2 - r));
-    const by = Math.max(0, Math.floor(y2 - r));
-    const bw = Math.min(docW - bx, Math.ceil(size));
-    const bh = Math.min(docH - by, Math.ceil(size));
-    if (bw > 2 && bh > 2) {
-      const tmp = document.createElement('canvas');
-      tmp.width = bw;
-      tmp.height = bh;
-      const tc = tmp.getContext('2d')!;
-      tc.filter = `blur(${Math.max(2, Math.round(size * 0.14))}px)`;
-      tc.drawImage(baseCanvas, bx, by, bw, bh, 0, 0, bw, bh);
-      for (const pl of paintLayers) {
-        if (pl.visible) tc.drawImage(pl.canvas, bx, by, bw, bh, 0, 0, bw, bh);
+    const blurSteps = Math.max(1, Math.ceil(dist / Math.max(4, size * 0.28)));
+    const blurSrc = cloneSourceCanvas;
+    for (let i = 0; i <= blurSteps; i++) {
+      const t = i / blurSteps;
+      const px = x1 + (x2 - x1) * t;
+      const py = y1 + (y2 - y1) * t;
+      const bx = Math.max(0, Math.floor(px - r));
+      const by = Math.max(0, Math.floor(py - r));
+      const bw = Math.min(docW - bx, Math.ceil(size));
+      const bh = Math.min(docH - by, Math.ceil(size));
+      if (bw > 2 && bh > 2) {
+        const tmp = document.createElement('canvas');
+        tmp.width = bw;
+        tmp.height = bh;
+        const tc = tmp.getContext('2d')!;
+        tc.filter = `blur(${Math.max(2, Math.round(size * 0.16))}px)`;
+        if (blurSrc) {
+          tc.drawImage(blurSrc, bx, by, bw, bh, 0, 0, bw, bh);
+        } else {
+          tc.drawImage(baseCanvas, bx, by, bw, bh, 0, 0, bw, bh);
+          for (const pl of paintLayers) {
+            if (pl.visible) tc.drawImage(pl.canvas, bx, by, bw, bh, 0, 0, bw, bh);
+          }
+        }
+        paintCtx.save();
+        paintCtx.globalAlpha = alpha * (0.45 + hardness * 0.35);
+        paintCtx.beginPath();
+        paintCtx.arc(px, py, r, 0, Math.PI * 2);
+        paintCtx.clip();
+        paintCtx.drawImage(tmp, bx, by);
+        paintCtx.restore();
       }
-      paintCtx.save();
-      paintCtx.globalAlpha = alpha * 0.6;
-      paintCtx.beginPath();
-      paintCtx.arc(x2, y2, r, 0, Math.PI * 2);
-      paintCtx.clip();
-      paintCtx.drawImage(tmp, bx, by);
-      paintCtx.restore();
     }
     return;
   }
@@ -634,7 +678,9 @@ export function applyBrushSegment(
   if (brush.type === 'marker') {
     paintCtx.save();
     paintCtx.fillStyle = brush.color;
-    paintCtx.globalAlpha = alpha * 0.85;
+    const chW = size;
+    const chH = Math.max(2, size * 0.38);
+    const softPad = (1 - hardness) * Math.max(2, size * 0.14);
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const px = x1 + (x2 - x1) * t;
@@ -642,7 +688,12 @@ export function applyBrushSegment(
       paintCtx.save();
       paintCtx.translate(px, py);
       paintCtx.rotate(-Math.PI / 6);
-      paintCtx.fillRect(-r, -r * 0.36, size, size * 0.36);
+      if (softPad > 0.8) {
+        paintCtx.globalAlpha = alpha * 0.32;
+        paintCtx.fillRect(-r - softPad * 0.5, -chH / 2 - softPad * 0.5, chW + softPad, chH + softPad);
+      }
+      paintCtx.globalAlpha = alpha;
+      paintCtx.fillRect(-r, -chH / 2, chW, chH);
       paintCtx.restore();
     }
     paintCtx.restore();
@@ -650,41 +701,79 @@ export function applyBrushSegment(
   }
 
   if (brush.type === 'screentone') {
+    // Deterministic 45° halftone dot screen locked to world coordinates
+    const cell = 7;
+    const dotR = 1.65 + (1 - hardness) * 0.45;
+    const cos45 = Math.SQRT1_2;
+    const sin45 = Math.SQRT1_2;
     paintCtx.save();
     paintCtx.fillStyle = brush.color;
-    paintCtx.globalAlpha = alpha * 0.65;
+    paintCtx.globalAlpha = alpha;
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const px = x1 + (x2 - x1) * t;
       const py = y1 + (y2 - y1) * t;
-      const density = Math.max(8, Math.round(size * 0.6));
-      for (let d = 0; d < density; d++) {
-        const ang = Math.random() * Math.PI * 2;
-        const rad = Math.random() * r;
-        paintCtx.fillRect(px + Math.cos(ang) * rad, py + Math.sin(ang) * rad, 2, 2);
+      const rx1 = px - r;
+      const ry1 = py - r;
+      const rx2 = px + r;
+      const ry2 = py + r;
+      // Bounding box in 45°-rotated grid space
+      const corners = [
+        [rx1, ry1],
+        [rx2, ry1],
+        [rx1, ry2],
+        [rx2, ry2],
+      ];
+      let minU = Infinity;
+      let maxU = -Infinity;
+      let minV = Infinity;
+      let maxV = -Infinity;
+      for (const [cx, cy] of corners) {
+        const u = cx * cos45 + cy * sin45;
+        const v = -cx * sin45 + cy * cos45;
+        if (u < minU) minU = u;
+        if (u > maxU) maxU = u;
+        if (v < minV) minV = v;
+        if (v > maxV) maxV = v;
+      }
+      const uStart = Math.floor(minU / cell) * cell;
+      const vStart = Math.floor(minV / cell) * cell;
+      for (let u = uStart; u <= maxU; u += cell) {
+        for (let v = vStart; v <= maxV; v += cell) {
+          const wx = u * cos45 - v * sin45;
+          const wy = u * sin45 + v * cos45;
+          const dCenter = Math.hypot(wx - px, wy - py);
+          if (dCenter <= r - 0.5) {
+            const edgeFactor =
+              hardness >= 0.95 ? 1 : Math.max(0.25, Math.min(1, (r - dCenter) / Math.max(2, r * (1 - hardness))));
+            paintCtx.beginPath();
+            paintCtx.arc(wx, wy, dotR * edgeFactor, 0, Math.PI * 2);
+            paintCtx.fill();
+          }
+        }
       }
     }
     paintCtx.restore();
     return;
   }
 
-  // gpen & airbrush respect hardness & spacing smoothly
+  // gpen & airbrush smoothly respect hardness & spacing
   const effHardness = brush.type === 'airbrush' ? Math.min(hardness, 0.35) : hardness;
   paintCtx.save();
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const px = x1 + (x2 - x1) * t;
     const py = y1 + (y2 - y1) * t;
-    if (effHardness >= 0.92 && brush.type === 'gpen') {
+    if (effHardness >= 0.97 && brush.type === 'gpen') {
       paintCtx.globalAlpha = alpha;
       paintCtx.fillStyle = brush.color;
       paintCtx.beginPath();
       paintCtx.arc(px, py, r, 0, Math.PI * 2);
       paintCtx.fill();
     } else {
-      const innerR = r * effHardness * 0.85;
+      const innerR = r * effHardness * 0.9;
       const g = paintCtx.createRadialGradient(px, py, innerR, px, py, r);
-      const stampAlpha = brush.type === 'airbrush' ? alpha * 0.42 : alpha;
+      const stampAlpha = brush.type === 'airbrush' ? alpha * 0.36 : alpha;
       g.addColorStop(0, `rgba(${cr},${cg},${cb},${stampAlpha})`);
       g.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
       paintCtx.fillStyle = g;
@@ -715,6 +804,21 @@ export function renderBrushPreviewCurve(canvas: HTMLCanvasElement, brush: BrushS
   const dummyBase = document.createElement('canvas');
   dummyBase.width = w;
   dummyBase.height = h;
+  const dbCtx = dummyBase.getContext('2d')!;
+  dbCtx.fillStyle = isDark ? '#121917' : '#f4f6f5';
+  dbCtx.fillRect(0, 0, w, h);
+
+  if (brush.type === 'blur') {
+    dbCtx.strokeStyle = isDark ? '#334155' : '#cbd5e1';
+    dbCtx.lineWidth = 2;
+    for (let x = 12; x < w; x += 18) {
+      dbCtx.beginPath();
+      dbCtx.moveTo(x, 6);
+      dbCtx.lineTo(x + 8, h - 6);
+      dbCtx.stroke();
+    }
+    ctx.drawImage(dummyBase, 0, 0);
+  }
 
   const pts: [number, number][] = [];
   const n = 28;
@@ -724,9 +828,18 @@ export function renderBrushPreviewCurve(canvas: HTMLCanvasElement, brush: BrushS
     const y = h / 2 + Math.sin(t * Math.PI * 2) * (h * 0.24);
     pts.push([x, y]);
   }
+
+  const useStrokeBuffer = brush.type === 'gpen' || brush.type === 'marker' || brush.type === 'screentone';
+  const drawTarget = useStrokeBuffer ? document.createElement('canvas') : null;
+  if (drawTarget) {
+    drawTarget.width = w;
+    drawTarget.height = h;
+  }
+  const targetCtx = drawTarget ? drawTarget.getContext('2d')! : ctx;
+
   for (let i = 1; i < pts.length; i++) {
     applyBrushSegment(
-      ctx,
+      targetCtx,
       pts[i - 1][0],
       pts[i - 1][1],
       pts[i][0],
@@ -737,8 +850,17 @@ export function renderBrushPreviewCurve(canvas: HTMLCanvasElement, brush: BrushS
       h,
       dummyBase,
       [],
-      null
+      null,
+      undefined,
+      useStrokeBuffer ? 100 : previewBrush.opacity
     );
+  }
+
+  if (drawTarget) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0.05, Math.min(1, brush.opacity / 100));
+    ctx.drawImage(drawTarget, 0, 0);
+    ctx.restore();
   }
 }
 
