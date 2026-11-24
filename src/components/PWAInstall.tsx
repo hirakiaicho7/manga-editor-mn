@@ -69,7 +69,7 @@ export const PWAInstallButton: React.FC = () => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showGuide, setShowGuide] = useState(false);
 
-  if (isInstalled) return null;
+  if (isInstalled || (typeof window !== 'undefined' && window.location.protocol === 'file:')) return null;
 
   if (isInstallable) {
     return (

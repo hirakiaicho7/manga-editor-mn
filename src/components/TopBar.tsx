@@ -5,6 +5,7 @@ import {
   Columns2,
   Download,
   Eye,
+  FileDown,
   FolderPlus,
   HelpCircle,
   Maximize2,
@@ -294,6 +295,18 @@ export const TopBar: React.FC<TopBarProps> = ({
           <Download className="w-3.5 h-3.5" />
           <span>Экспорт</span>
         </button>
+
+        {typeof window !== 'undefined' && window.location.protocol !== 'file:' && (
+          <a
+            href="/PanelFlow-Studio.html"
+            download="PanelFlow-Studio.html"
+            title="Офлайн ганц HTML файлаар татах"
+            className="h-8 px-2.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
+          >
+            <FileDown className="w-3.5 h-3.5" />
+            <span>HTML</span>
+          </a>
+        )}
 
         <PWAInstallButton />
 

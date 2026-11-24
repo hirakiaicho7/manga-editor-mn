@@ -196,6 +196,19 @@ async function startServer() {
     }
   });
 
+  app.get('/PanelFlow-Studio.html', (_req, res) => {
+    const prodFile = path.resolve(process.cwd(), 'dist', 'PanelFlow-Studio.html');
+    const pubFile = path.resolve(process.cwd(), 'public', 'PanelFlow-Studio.html');
+    const filePath = fs.existsSync(pubFile) ? pubFile : prodFile;
+    if (!fs.existsSync(filePath)) {
+      res.status(404).send('PanelFlow-Studio.html not built yet.');
+      return;
+    }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="PanelFlow-Studio.html"');
+    res.sendFile(filePath);
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({

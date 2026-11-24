@@ -47,6 +47,7 @@ export default defineConfig(() => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          globIgnores: ['**/PanelFlow-Studio.html'],
           navigateFallbackDenylist: [/^\/api\//],
           runtimeCaching: [
             {

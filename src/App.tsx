@@ -861,6 +861,12 @@ export default function App() {
   const handleAiCleanRegions = useCallback(
     async (scope: 'view' | 'all', filter: AiCleanFilter) => {
       if (aiCleanBusy) return;
+      if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
+        const msg = 'Офлайн HTML файл тул сервертэй AI холбогдох боломжгүй — «Энгийн Auto» цэвэрлэгчийг ашиглана уу.';
+        setCleanStatus({ kind: 'empty', text: msg });
+        showToast(msg);
+        return;
+      }
       const base = baseCanvasRef.current;
       const targetLayer =
         paintLayers.find((l) => l.id === activePaintLayerId && !l.locked) ||
