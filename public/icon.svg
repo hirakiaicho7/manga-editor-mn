@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#047857"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="88" y="88" width="150" height="200" rx="20" fill="#ecfdf5"/>
+  <rect x="274" y="88" width="150" height="120" rx="20" fill="#ecfdf5" fill-opacity="0.9"/>
+  <rect x="274" y="236" width="150" height="188" rx="20" fill="#052e23"/>
+  <rect x="88" y="314" width="150" height="110" rx="20" fill="#ecfdf5" fill-opacity="0.85"/>
+  <text x="349" y="352" text-anchor="middle" font-family="system-ui, sans-serif" font-weight="800" font-size="78" fill="#34d399">PF</text>
+</svg>

@@ -1,0 +1,6 @@
+{
+  "name": "PanelFlow Studio",
+  "description": "Мэргэжлийн Manga, Manhwa, Webtoon орчуулга ба эдит студи — Non-destructive давхарга, ухаалаг цэвэрлэгч, текст ба бийрний систем.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
