@@ -15,28 +15,36 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 function openDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains('projects')) {
-        db.createObjectStore('projects', { keyPath: 'id' });
+    try {
+      if (typeof indexedDB === 'undefined') {
+        reject(new Error('IndexedDB unavailable'));
+        return;
       }
-      if (!db.objectStoreNames.contains('snapshots')) {
-        const snap = db.createObjectStore('snapshots', { keyPath: 'id' });
-        snap.createIndex('projectId', 'projectId', { unique: false });
-      }
-      if (!db.objectStoreNames.contains('fonts')) {
-        db.createObjectStore('fonts', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('logos')) {
-        db.createObjectStore('logos', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('settings')) {
-        db.createObjectStore('settings');
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('projects')) {
+          db.createObjectStore('projects', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('snapshots')) {
+          const snap = db.createObjectStore('snapshots', { keyPath: 'id' });
+          snap.createIndex('projectId', 'projectId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('fonts')) {
+          db.createObjectStore('fonts', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('logos')) {
+          db.createObjectStore('logos', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('settings')) {
+          db.createObjectStore('settings');
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch (err) {
+      reject(err);
+    }
   });
   return dbPromise;
 }

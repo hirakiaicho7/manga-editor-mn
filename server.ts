@@ -196,16 +196,26 @@ async function startServer() {
     }
   });
 
-  app.get('/PanelFlow-Studio.html', (_req, res) => {
+  app.get('/PanelFlow-Studio.html', (req, res) => {
     const prodFile = path.resolve(process.cwd(), 'dist', 'PanelFlow-Studio.html');
     const pubFile = path.resolve(process.cwd(), 'public', 'PanelFlow-Studio.html');
-    const filePath = fs.existsSync(pubFile) ? pubFile : prodFile;
+    const primary = process.env.NODE_ENV === 'production' ? prodFile : pubFile;
+    const secondary = process.env.NODE_ENV === 'production' ? pubFile : prodFile;
+    const filePath = fs.existsSync(primary) ? primary : secondary;
     if (!fs.existsSync(filePath)) {
       res.status(404).send('PanelFlow-Studio.html not built yet.');
       return;
     }
+    if (req.query.raw === '1') {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(filePath);
+      return;
+    }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="PanelFlow-Studio.html"');
+    if (req.query.view !== '1') {
+      res.setHeader('Content-Disposition', 'attachment; filename="PanelFlow-Studio.html"');
+    }
     res.sendFile(filePath);
   });
 
@@ -218,7 +228,7 @@ async function startServer() {
     app.use(vite.middlewares);
 
     app.use(async (req, res, next) => {
-      if (req.method !== 'GET' || req.path.startsWith('/api/')) {
+      if ((req.method !== 'GET' && req.method !== 'HEAD') || req.path.startsWith('/api/')) {
         next();
         return;
       }
@@ -235,7 +245,7 @@ async function startServer() {
     const distDir = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distDir));
     app.use((req, res, next) => {
-      if (req.method !== 'GET' || req.path.startsWith('/api/')) {
+      if ((req.method !== 'GET' && req.method !== 'HEAD') || req.path.startsWith('/api/')) {
         next();
         return;
       }

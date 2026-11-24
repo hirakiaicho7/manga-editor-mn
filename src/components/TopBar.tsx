@@ -5,7 +5,6 @@ import {
   Columns2,
   Download,
   Eye,
-  FileDown,
   FolderPlus,
   HelpCircle,
   Maximize2,
@@ -99,9 +98,9 @@ export const TopBar: React.FC<TopBarProps> = ({
   };
 
   return (
-    <header className="h-12 shrink-0 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#111715] px-3 flex items-center justify-between gap-3 relative z-30">
+    <header className="h-12 shrink-0 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#111715] px-2 sm:px-3 flex items-center justify-between gap-2 sm:gap-3 overflow-x-auto relative z-30">
       {/* Left: Brand & Project title */}
-      <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0">
         <div className="flex items-center gap-2 shrink-0">
           <div className="w-7 h-7 rounded-lg bg-emerald-600 dark:bg-emerald-500 flex items-center justify-center text-white dark:text-neutral-950 font-bold text-sm">
             PF
@@ -136,7 +135,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               setEditingName(true);
             }}
             title="Төслийн нэр засах"
-            className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 hover:text-emerald-600 dark:hover:text-emerald-400 truncate max-w-[140px] whitespace-nowrap"
+            className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 hover:text-emerald-600 dark:hover:text-emerald-400 truncate max-w-[95px] sm:max-w-[140px] whitespace-nowrap hidden sm:inline-block"
           >
             {projectName}
           </button>
@@ -295,18 +294,6 @@ export const TopBar: React.FC<TopBarProps> = ({
           <Download className="w-3.5 h-3.5" />
           <span>Экспорт</span>
         </button>
-
-        {typeof window !== 'undefined' && window.location.protocol !== 'file:' && (
-          <a
-            href="/PanelFlow-Studio.html"
-            download="PanelFlow-Studio.html"
-            title="Офлайн ганц HTML файлаар татах"
-            className="h-8 px-2.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
-          >
-            <FileDown className="w-3.5 h-3.5" />
-            <span>HTML</span>
-          </a>
-        )}
 
         <PWAInstallButton />
 

@@ -40,6 +40,7 @@ const result = await esbuild.build({
   entryPoints: [path.join(root, 'src', 'main.tsx')],
   bundle: true,
   minify: true,
+  legalComments: 'none',
   write: false,
   format: 'iife',
   platform: 'browser',
@@ -68,6 +69,9 @@ const html = `<!doctype html>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#111715" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>PanelFlow Studio — Мэргэжлийн Manga &amp; Comic Editor</title>
     <meta name="description" content="Мэргэжлийн Manga, Manhwa, Webtoon орчуулга ба эдит студи — Non-destructive давхарга, ухаалаг цэвэрлэгч, текст ба бийрний систем." />
     ${iconHref ? `<link rel="icon" type="image/svg+xml" href="${iconHref}" />` : ''}
